@@ -7,7 +7,7 @@
  * An API for a Key Value store that uses a hash table to store data in a shared*
  * memory object.                                                               *
  *                                                                              *
- * It uses semaphores to protect the database against writes on buckets that are*
+ * It uses semaphores to protect the database against writes on pod that are    *
  * currently being read, yet allows multiple readers to read a pod at the same  *
  * time.                                                                        *
  *******************************************************************************/
@@ -39,6 +39,7 @@ index_pair *newIndexPair() {
     return pair;
 }
 
+
 void delIndexPair(index_pair *pair) {
     free(pair->key);
     free(pair);
@@ -56,6 +57,7 @@ index_pair ***newIndex() {
 
     return index;
 }
+
 
 void delIndex(index_pair ***index) {
     for (int i=0; i<NUM_PODS; i++) {
@@ -82,6 +84,7 @@ kv_pair *newKVpair(void *addr, int empty) {
 
     return pair;
 }
+
 
 void delKVpair(kv_pair *pair) {
     free(pair);
@@ -119,6 +122,7 @@ kv_pod *newKVpod(void *addr, int empty) {
     return pod;
 }
 
+
 void delKVpod(kv_pod *pod) {
     for (int i=0; i<POD_DEPTH; i++) {
         delKVpair(pod->kv_pairs[i]);
@@ -148,6 +152,7 @@ kv_store *newStore(char *name, void *addr, int empty) {
     return store;
 }
 
+
 void delStore(kv_store *store) {
     free(store->name);
     for (int i=0; i<NUM_PODS; i++) {
@@ -157,6 +162,7 @@ void delStore(kv_store *store) {
     delIndex(store->index);
     free(store);
 }
+
 
 /********************************************************************************
  * Helpers functions                                                            *
@@ -246,8 +252,12 @@ int get_index(index_pair **ipod, char *key) {
     return 0;
 }
 
+
 /*
  * Updates the key's index
+ *
+ * If the key is found in the index pod, it's index is changed to the new one.
+ * Otherwise, we add the key to the index pod and set its index.
  *
  * @param ipod The index pod to update
  * @param key The key to update
@@ -262,6 +272,7 @@ void update_index(index_pair **ipod, char *key, int index) {
     }
     add_index(ipod, key, index);
 }
+
 
 /********************************************************************************
  * Read/Write Locks                                                             *
@@ -279,6 +290,7 @@ void acquire_wlock(kv_pod *pod) {
     sem_wait(pod->OKtoWrite);
 }
 
+
 /*
  * Releases the write lock
  *
@@ -288,11 +300,12 @@ void release_wlock(kv_pod *pod) {
     sem_post(pod->OKtoWrite);
 }
 
+
 /*
  * Acquires the read lock
  *
  * If this is the only current reader to ask for a lock, then the write lock will
- * also be acquired to prevent writing while others a reading
+ * also be acquired to prevent writing while others are reading
  *
  * @param pod The key-value pod to get a read lock for
  */
@@ -302,6 +315,7 @@ void acquire_rlock(kv_pod *pod) {
         sem_wait(pod->OKtoWrite);
     sem_post(pod->OKtoRead);
 }
+
 
 /*
  * Releases the read lock
@@ -332,8 +346,8 @@ void release_rlock(kv_pod *pod) {
 
 /*
  * Creates a store. A successful call will cause the provided kv_store pointer  
- * to point to a 
- *  1) newly created store with the provided name, or
+ * to point to: 
+ *  1) a newly created store with the provided name, or
  *  2) a previously created store if the name already exists
  * The function may fail due to insufficient user permissions or memory. On
  * failure, store will be a NULL pointer.
@@ -383,6 +397,9 @@ void _kv_delete_db(kv_store *store) {
  * If there is no space left in the pod to which the key is hashed, the earliest
  * inserted key-value pair will be overwritten by the new pair.
  *
+ * On key removal, the index will also be cleaned from the index to make sure
+ * there's room for the new index. See clean_index()
+ *
  * @param store The store to write to
  * @param key The key to write with
  * @param value The value to write
@@ -413,8 +430,8 @@ int _kv_store_write(kv_store *store, char *key, char *value) {
 
 /*
  * Reads the value associated with the provided key from the store. Each read
- * updates an index such that subsequent reads provide the next value. If the key
- * is not found, a NULL value is returned.
+ * updates the index such that subsequent reads provide the next value. If the
+ * key is not found, a NULL value is returned.
  *
  * This function returns a pointer to a newly allocated string. It is the
  * responsibility of the calling process to free the associated memory.
@@ -501,7 +518,8 @@ char **_kv_store_read_all(kv_store *store, char *key) {
  * Wrappers for the Key-Value Store API                                         *
  *                                                                              *
  * Provides wrappers for the Key-Value Store so they adhere to the specs in "2. *
- * Suggested Implementation"                                                    *
+ * Suggested Implementation". Please refer to the mini_pa2 doc for further      *
+ * documentation.                                                               *
  *                                                                              *
  *******************************************************************************/
 
@@ -514,18 +532,22 @@ int kv_store_create(char *name) {
     return 0;
 }
 
+
 int kv_store_write(char *key, char *value) {
     _kv_store_write(global_store, key, value);
     return 0;
 }
 
+
 char *kv_store_read(char *key) {
     return _kv_store_read(global_store, key);
 }
 
+
 char **kv_store_read_all(char *key) {
     return _kv_store_read_all(global_store, key);
 }
+
 
 void kv_delete_db() {
     _kv_delete_db(global_store);
