@@ -45,7 +45,7 @@ int main(int argc, char *argv[]) {
     kv_store_write(k2, vs[0]);
     kv_store_write(k2, vs[1]);
     kv_store_write(k2, vs[2]);
-    char **values = kv_store_readall(k2);
+    char **values = kv_store_read_all(k2);
     int check = 0;
     for (int i=0; i<3; i++) {
         if((check = strncmp(values[i], vs[i], VALUE_LEN)) != 0) {

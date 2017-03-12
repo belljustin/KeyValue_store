@@ -68,15 +68,17 @@ void delIndex(index_pair ***index) {
 }
 
 
-kv_pair *newKVpair(void *addr) {
+kv_pair *newKVpair(void *addr, int empty) {
     kv_pair *pair = malloc(sizeof(kv_pair));
 
     pair->key = addr;
     addr += KEY_LEN * sizeof(char);
-    memset(pair->key, '\0', KEY_LEN);
+    if (empty == 1)
+        memset(pair->key, '\0', KEY_LEN);
 
     pair->value = addr;
-    memset(pair->value, '\0', VALUE_LEN);
+    if (empty == 1)
+        memset(pair->value, '\0', VALUE_LEN);
 
     return pair;
 }
@@ -86,7 +88,7 @@ void delKVpair(kv_pair *pair) {
 }
 
 
-kv_pod *newKVpod(void *addr) {
+kv_pod *newKVpod(void *addr, int empty) {
     kv_pod *pod = malloc(sizeof(kv_pod));
     pod->write_counter = addr;
     *(pod->write_counter) = 0;
@@ -106,7 +108,7 @@ kv_pod *newKVpod(void *addr) {
 
     pod->kv_pairs = calloc(POD_DEPTH, sizeof(void *));
     for (int i=0; i<POD_DEPTH; i++) {
-        pod->kv_pairs[i] = newKVpair(addr);
+        pod->kv_pairs[i] = newKVpair(addr, empty);
         addr += KV_SIZE;
     }
 
@@ -124,15 +126,17 @@ void delKVpod(kv_pod *pod) {
 }
 
 
-kv_store *newStore(char *name, void *addr) {
+kv_store *newStore(char *name, void *addr, int empty) {
     kv_store *store = malloc(sizeof(kv_store));
     store->name = malloc(NAME_SIZE * sizeof(char));
-    memset(store->name, '\0', NAME_SIZE);
-    strncpy(store->name, name, strlen(name));
+    if (empty == 1) {
+        memset(store->name, '\0', NAME_SIZE);
+        strncpy(store->name, name, strlen(name));
+    }
 
     store->kv_pods = calloc(NUM_PODS, sizeof(void *));
     for (int i=0; i<NUM_PODS; i++) {
-        store->kv_pods[i] = newKVpod(addr);
+        store->kv_pods[i] = newKVpod(addr, empty);
         addr += POD_SIZE;
     }
 
@@ -169,9 +173,9 @@ int hash(char *key) {
     int h = 7;
     const int key_len = strlen(key);
     for (int i=0; i<key_len; i++) {
-        h = h*31 + key[i];
+        h = (h*31 + key[i]) % NUM_PODS;
     }
-    return h % NUM_PODS;
+    return h;
 }
 
 
@@ -334,16 +338,21 @@ void release_rlock(kv_pod *pod) {
  * @param store The pointer for the store
  */
 kv_store *_kv_store_create(char *name, kv_store *store) {
-    int fd = shm_open(name, O_RDWR|O_CREAT, S_IRWXU);
-    if (fd == -1)
-        return NULL;
+    int new_store = 1;
+    int fd = shm_open(name, O_RDWR|O_CREAT|O_EXCL, S_IRWXU);
+    if (fd == -1) {
+        new_store = 0;
+        fd = shm_open(name, O_RDWR|O_CREAT, S_IRWXU);
+        if (fd == -1)
+            return NULL;
+    }
 
     ftruncate(fd, STORE_SIZE);
-    void *addr = mmap(NULL, STORE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+    void *addr = mmap(NULL, STORE_SIZE, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
     if (addr == MAP_FAILED)
         return NULL;
 
-    store = newStore(name, addr);
+    store = newStore(name, addr, new_store);
     
     close(fd);
 
@@ -417,12 +426,13 @@ char *kv_store_peek(kv_store *store, char *key) {
     for (;i<POD_DEPTH; i++) {
         int offset = (index + i) % POD_DEPTH;
         if (strncmp(pod->kv_pairs[offset]->key, key, KEY_LEN) == 0) {
-            strncpy(value, pod->kv_pairs[offset]->value, KEY_LEN);
+            strncpy(value, pod->kv_pairs[offset]->value, VALUE_LEN);
             break;
         }
     }
-    if (value[0] == '\0')
+    if (value[0] == '\0') {
         return NULL;
+    }
     return value;
 }
 
@@ -449,12 +459,13 @@ char *_kv_store_read(kv_store *store, char *key) {
     index_pair **ipod = store->index[h];
     int index = get_index(ipod, key); 
     
-    char *value = malloc(VALUE_LEN * sizeof(char));
+    char *value = NULL;
     int i=0;
     for (;i<POD_DEPTH; i++) {
         int offset = (index + i) % POD_DEPTH;
         if (strncmp(pod->kv_pairs[offset]->key, key, KEY_LEN) == 0) {
-            strncpy(value, pod->kv_pairs[offset]->value, KEY_LEN);
+            value = malloc(VALUE_LEN * sizeof(char));
+            strncpy(value, pod->kv_pairs[offset]->value, VALUE_LEN);
             i++;
             break;
         }
@@ -468,10 +479,6 @@ char *_kv_store_read(kv_store *store, char *key) {
     }
     release_rlock(pod);
 
-    if (value[0] == '\0') {
-        free(value);
-        return NULL;
-    }
     return value;
 }
 
@@ -487,17 +494,18 @@ char *_kv_store_read(kv_store *store, char *key) {
  * @return  A pointer to an array of  duplicate strings representing the values
  *          in the store
  */
-char **_kv_store_readall(kv_store *store, char *key) {
+char **_kv_store_read_all(kv_store *store, char *key) {
     int h = hash(key);
     kv_pod *pod = store->kv_pods[h];
     acquire_rlock(pod);
 
-    char **values = calloc(POD_DEPTH, sizeof(char *));
+    char **values = NULL;
     char *value = _kv_store_read(store, key);
     if (value == NULL) {
         release_rlock(pod);
-        return values;
+        return NULL;
     } 
+    values = calloc(POD_DEPTH, sizeof(char *));
 
     int i=0;
     values[i++] = value;
@@ -506,6 +514,10 @@ char **_kv_store_readall(kv_store *store, char *key) {
         values[i++] = _kv_store_read(store, key);
         free(peek_value);
         peek_value = kv_store_peek(store, key);
+    }
+    i++;
+    while (i<POD_DEPTH) {
+        values[i++] = NULL;
     }
     free(peek_value);
     release_rlock(pod);
@@ -539,8 +551,8 @@ char *kv_store_read(char *key) {
     return _kv_store_read(global_store, key);
 }
 
-char **kv_store_readall(char *key) {
-    return _kv_store_readall(global_store, key);
+char **kv_store_read_all(char *key) {
+    return _kv_store_read_all(global_store, key);
 }
 
 void kv_delete_db() {
