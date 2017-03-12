@@ -91,11 +91,13 @@ void delKVpair(kv_pair *pair) {
 kv_pod *newKVpod(void *addr, int empty) {
     kv_pod *pod = malloc(sizeof(kv_pod));
     pod->write_counter = addr;
-    *(pod->write_counter) = 0;
+    if (empty == 1)
+        *(pod->write_counter) = 0;
     addr += sizeof(int);
 
     pod->num_readers = addr;
-    *(pod->num_readers) = 0;
+    if (empty == 1)
+        *(pod->num_readers) = 0;
     addr += sizeof(int);
 
     pod->OKtoRead = addr;
@@ -348,7 +350,7 @@ kv_store *_kv_store_create(char *name, kv_store *store) {
     }
 
     ftruncate(fd, STORE_SIZE);
-    void *addr = mmap(NULL, STORE_SIZE, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
+    void *addr = mmap(NULL, STORE_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
     if (addr == MAP_FAILED)
         return NULL;
 
@@ -515,7 +517,6 @@ char **_kv_store_read_all(kv_store *store, char *key) {
         free(peek_value);
         peek_value = kv_store_peek(store, key);
     }
-    i++;
     while (i<POD_DEPTH) {
         values[i++] = NULL;
     }
