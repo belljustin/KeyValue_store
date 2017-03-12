@@ -41,7 +41,7 @@ int main(){
     printf("-----------Multiprocess Testing Of Shared Memory Database-----------\n");
     printf("-----------CAUTION. This test assumes test 1 with no errors. -----------\n");
     for(int k = 0; k < RUN_ITERATIONS; k++){
-        printf("-----------ROUND %d-----------\n", k + 1);
+        printf("-----------ROUND %d-----------\r", k + 1);
         temp_flag = -1;
         write_count = 0;
         memset(pids, -1, __TEST_FORK_NUM__ * sizeof(int));

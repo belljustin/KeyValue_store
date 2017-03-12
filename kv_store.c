@@ -102,12 +102,12 @@ kv_pod *newKVpod(void *addr, int empty) {
 
     pod->OKtoRead = addr;
     if (empty == 1)
-    	sem_init(pod->OKtoRead, 1, 1);
+        sem_init(pod->OKtoRead, 1, 1);
     addr += sizeof(sem_t);
 
     pod->OKtoWrite = addr;
     if (empty == 1)
-	sem_init(pod->OKtoWrite, 1, 1);
+	    sem_init(pod->OKtoWrite, 1, 1);
     addr += sizeof(sem_t);
 
     pod->kv_pairs = calloc(POD_DEPTH, sizeof(void *));
@@ -260,6 +260,7 @@ void update_index(index_pair **ipod, char *key, int index) {
             return;
         }
     }
+    add_index(ipod, key, index);
 }
 
 /********************************************************************************
@@ -370,6 +371,7 @@ kv_store *_kv_store_create(char *name, kv_store *store) {
  * @param store The store to delete
  */
 void _kv_delete_db(kv_store *store) {
+    munmap(store->kv_pods[0]->write_counter, STORE_SIZE);
     shm_unlink(store->name);
     delStore(store);
 }
@@ -408,36 +410,6 @@ int _kv_store_write(kv_store *store, char *key, char *value) {
     release_wlock(pod);
 }
 
-/*
- * Provides a way to peek at the next value associated with a key without
- * updating the index.
- *
- * This function is helpful to ensure the last read in kv_store_readall() happens
- * just before the first read value
- *
- * @param store The store to peek into
- * @param key The key to peek
- */
-char *kv_store_peek(kv_store *store, char *key) {
-    int h = hash(key);
-    index_pair **ipod = store->index[h];
-    int index = get_index(ipod, key); 
-    
-    char *value = malloc(VALUE_LEN * sizeof(char));
-    kv_pod *pod = store->kv_pods[h];
-    int i=0;
-    for (;i<POD_DEPTH; i++) {
-        int offset = (index + i) % POD_DEPTH;
-        if (strncmp(pod->kv_pairs[offset]->key, key, KEY_LEN) == 0) {
-            strncpy(value, pod->kv_pairs[offset]->value, VALUE_LEN);
-            break;
-        }
-    }
-    if (value[0] == '\0') {
-        return NULL;
-    }
-    return value;
-}
 
 /*
  * Reads the value associated with the provided key from the store. Each read
@@ -502,6 +474,8 @@ char **_kv_store_read_all(kv_store *store, char *key) {
     kv_pod *pod = store->kv_pods[h];
     acquire_rlock(pod);
 
+    int start = get_index(store->index[h], key);
+
     char **values = NULL;
     char *value = _kv_store_read(store, key);
     if (value == NULL) {
@@ -512,16 +486,12 @@ char **_kv_store_read_all(kv_store *store, char *key) {
 
     int i=0;
     values[i++] = value;
-    char *peek_value = kv_store_peek(store, key);
-    while (strncmp(values[0], peek_value, VALUE_LEN) != 0) {
+    while (get_index(store->index[h], key) != start) {
         values[i++] = _kv_store_read(store, key);
-        free(peek_value);
-        peek_value = kv_store_peek(store, key);
     }
     while (i<POD_DEPTH) {
         values[i++] = NULL;
     }
-    free(peek_value);
     release_rlock(pod);
     return values;
 }

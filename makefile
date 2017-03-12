@@ -11,4 +11,5 @@ kv_store.o: kv_store.c kv_store.h
 	gcc -c kv_store.c -g -lrt
 
 clean:
-	rm -f *.o main.out test1.out test2.out
+	rm -f *.o main.out test1.out test2.out /dev/shm/*
+	pkill -f test2.out
