@@ -101,11 +101,13 @@ kv_pod *newKVpod(void *addr, int empty) {
     addr += sizeof(int);
 
     pod->OKtoRead = addr;
-    sem_init(pod->OKtoRead, 1, 1);
+    if (empty == 1)
+    	sem_init(pod->OKtoRead, 1, 1);
     addr += sizeof(sem_t);
 
     pod->OKtoWrite = addr;
-    sem_init(pod->OKtoWrite, 1, 1);
+    if (empty == 1)
+	sem_init(pod->OKtoWrite, 1, 1);
     addr += sizeof(sem_t);
 
     pod->kv_pairs = calloc(POD_DEPTH, sizeof(void *));
@@ -131,10 +133,9 @@ void delKVpod(kv_pod *pod) {
 kv_store *newStore(char *name, void *addr, int empty) {
     kv_store *store = malloc(sizeof(kv_store));
     store->name = malloc(NAME_SIZE * sizeof(char));
-    if (empty == 1) {
-        memset(store->name, '\0', NAME_SIZE);
-        strncpy(store->name, name, strlen(name));
-    }
+    
+    memset(store->name, '\0', NAME_SIZE);
+    strncpy(store->name, name, strlen(name));
 
     store->kv_pods = calloc(NUM_PODS, sizeof(void *));
     for (int i=0; i<NUM_PODS; i++) {
